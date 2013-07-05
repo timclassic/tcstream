@@ -1,0 +1,23 @@
+%%% -*- mode: Erlang -*-
+%%%-------------------------------------------------------------------------
+%%% @author Tim Stewart <tim@trueex.com>
+%%%  [http://www.trueex.com]
+%%% @copyright 2013 trueEX Group, LLC
+%%% @end
+%%%-------------------------------------------------------------------------
+
+{application, tcstream,
+ [{description, "XHR/XDR HTTP Streaming"},
+  {vsn, "0.0.1"},
+  {modules, []},
+  {registered, [tcstream_sup]},
+  {applications, [kernel,
+                  stdlib,
+                  sasl,
+                  inets,
+                  crypto,
+                  mochiweb,
+                  webmachine]},
+  {mod, {tcstream_app, []}},
+  {env, []}
+ ]}.
