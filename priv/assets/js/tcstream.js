@@ -676,7 +676,7 @@ function TCStreamSession(url) {
     this._headers = {};
 
     /* Stream state */
-    this.state = 'recovery';
+    this.state = 'stopped';
     this.recovery_pause = 2000;
     this.recovery_timer = undefined;
     this.last_seq = 0;
@@ -711,14 +711,24 @@ TCStreamSession.prototype = {
         delete this._channels[channel];
     },
 
-    /* Connect to server */
+    /* Start up stream */
     connect: function() {
+        this.state = 'recovery';
+
         /* Schedule warning and error handlers for initial connections */
         this._set_warning_timer();
         this._set_error_timer();
 
         /* Trigger connection recovery code for initial connections */
         this._sched_recovery(0);
+    },
+
+    /* Disconnect stream */
+    disconnect: function() {
+        if (this.state === 'active' || this.state === 'recovery') {
+            this.state = 'stopped';
+            this._terminate_stream();
+        }
     },
 
     /* Acknowledge a message */
@@ -806,7 +816,6 @@ TCStreamSession.prototype = {
     /* Handle end of individual path */
     _handle_path_end: function(ref) {
         if (this.state === 'active' && this.need_nonce === false) {
-            /* if (this.state === 'active') { */
             this.need_reconnect = false;
             this._reconnect_path(ref);
         } else {
@@ -937,6 +946,14 @@ TCStreamSession.prototype = {
         }
         this.state = 'failed';
 
+        this._terminate_stream();
+
+        /* Schedule owner's error state handler */
+        var stream = this;
+        setTimeout(function() { stream.onerror(); }, 0);
+    },
+        
+    _terminate_stream: function() {
         /* Shut down all connections */
         for (var i = 0; i < 2; i++) {
             if (this._path[i] != undefined) {
@@ -964,10 +981,6 @@ TCStreamSession.prototype = {
             clearTimeout(this.inact_timer);
             this.inact_timer = undefined;
         }
-
-        /* Schedule owner's error state handler */
-        var stream = this;
-        setTimeout(function() { stream.onerror(); }, 0);
     },
 
     _cancel_inact_timer: function() {
