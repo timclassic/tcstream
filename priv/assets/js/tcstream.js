@@ -4,22 +4,22 @@
 
 
 function TCStreamPath(ref, owner) {
-    this.ref = ref;                    // Opaque reference, used by owner
-    this.xhrobj = this._create_xhr();  // Get our actual object
+    this._ref = ref;                    // Opaque reference, used by owner
+    this._xhrobj = this._create_xhr();  // Get our actual object
 
     /* Max header length.  This constant indirectly controls the
      * maximum payload length in SYNC and DATA frames by bounding the
      * max string length of the data length fields */
-    this.max_version_len = 2;
-    this.max_frametype_len = 1;
-    this.max_channel_len = 20;
-    this.max_length_len = 6;
-    this.max_seq_len = 6;
+    this._max_version_len = 2;
+    this._max_frametype_len = 1;
+    this._max_channel_len = 20;
+    this._max_length_len = 6;
+    this._max_seq_len = 6;
 
     /* Set object state */
     this._reset_state();
 
-    /* Event handlers */
+    /* Event handlers, settable by caller */
     this.ontimeout = new Function();
     this.onsync = new Function();
     this.onnonce = new Function();
@@ -34,7 +34,7 @@ TCStreamPath.prototype = {
      * Public interface
      */
 
-    /* Connect an individual XHR/XDR object */
+    /* Connect XHR/XDR object */
     connect: function(method, url, body) {
         var streamxhr = this;
 
@@ -42,7 +42,7 @@ TCStreamPath.prototype = {
          * the open() call (Mozilla) */
         this._set_xhrobj_handlers();
 
-        this.xhrobj.open(method, url + "/path" + this.ref, true);
+        this._xhrobj.open(method, url + "/path" + this._ref, true);
 
         /* And other browsers require that they happen after (IE) */
         this._set_xhrobj_handlers();
@@ -51,11 +51,48 @@ TCStreamPath.prototype = {
          * Content-Type.  If we're in IE, skip it, since we can't set
          * headers with XDomainRequest anyway.  It's up to the
          * webserver to know what we're up to, anyway. */
-        if ('setRequestHeader' in this.xhrobj) {
-            this.xhrobj.setRequestHeader("Content-Type",
+        if ('setRequestHeader' in this._xhrobj) {
+            this._xhrobj.setRequestHeader("Content-Type",
                                          "text/plain;charset=UTF-8");
         }
-        this.xhrobj.send(body);
+        this._xhrobj.send(body);
+    },
+
+    /* Disconnect XHR/XDR object */
+    disconnect: function() {
+        this._xhrobj.abort();
+    },
+
+    /* Clean up TCStreamPath object */
+    reset: function() {
+        /* Clean up event handlers */
+        if (window.XDomainRequest) {
+            delete this._xhrobj.onload;
+        } else {
+            delete this._xhrobj.onreadystatechange;
+        }
+        delete this._xhrobj.onprogress;
+        delete this._xhrobj.ontimeout;
+        delete this._xhrobj.onerror;
+
+        /* Finally, delete the XHR/XDR object itself if we are on
+         * Windows.  IE8 (and perhaps other versions) will crash after
+         * a little while if we don't do this.  Memory usage stays
+         * pretty level using this technique.
+         *
+         * Chrome prefers to reuse the same object. */
+        if (window.XDomainRequest) {
+            delete this._xhrobj;
+        }
+
+        /* Reset state of this object */
+        this._reset_state();
+
+        /* Set up a fresh XHR/XDR object if we are on Windows.  See
+         * comment above for explanation. */
+        if (window.XDomainRequest) {
+            this._xhrobj = this._create_xhr();
+        }
     },
 
     /*
@@ -69,79 +106,47 @@ TCStreamPath.prototype = {
          * end of path */
         if (window.XDomainRequest) {
             /* IE */
-            this.xhrobj.onload = function(event) {
+            this._xhrobj.onload = function(event) {
                 streamxhr._handle_pathend(event);
             };
         } else {
             /* Others */
-            this.xhrobj.onreadystatechange = function(event) {
-                if (streamxhr.xhrobj.readyState === 4) {
+            this._xhrobj.onreadystatechange = function(event) {
+                if (streamxhr._xhrobj.readyState === 4) {
                     streamxhr._handle_pathend(event);
                 }
             };
         }
 
-        this.xhrobj.onprogress = function(event) {
+        this._xhrobj.onprogress = function(event) {
             streamxhr._handle_progress(event);
         };
-        this.xhrobj.ontimeout = function(event) {
+        this._xhrobj.ontimeout = function(event) {
             streamxhr._handle_timeout(event);
         };
-        this.xhrobj.onerror = function(event) {
+        this._xhrobj.onerror = function(event) {
             streamxhr._handle_error();
         };
 
-        this.xhrobj.timeout = 0;
+        this._xhrobj.timeout = 0;
     },
 
     _reset_state: function() {
         /* Current response text */
-        this.rt = "";
+        this._rt = "";
 
         /* Protocol state tracking */
-        this.ver = 0;
-        this.state = 'sync_frame';
-        this.last_parse = 0;
-        this.last_parse_timer = undefined;
+        this._ver = 0;
+        this._path_state = 'sync_frame';
+        this._last_parse = 0;
+        this._last_parse_timer = undefined;
 
         /* Frame tracking */
-        this.frame_off = 0;    // Current frame offset
-        this.data_off = -1;    // Current data block offset
-        this.data_len = -1;    // Current data block length
-        this.seq = 0;          // Sequence number for current data frame
-        this.channel = "";     // Channel name for current data frame
-    },
-
-    /* Clean up TCStreamPath object */
-    _reset: function() {
-        /* Clean up event handlers */
-        if (window.XDomainRequest) {
-            delete this.xhrobj.onload;
-        } else {
-            delete this.xhrobj.onreadystatechange;
-        }
-        delete this.xhrobj.onprogress;
-        delete this.xhrobj.ontimeout;
-        delete this.xhrobj.onerror;
-
-        /* Finally, delete the XHR/XDR object itself if we are on
-         * Windows.  IE8 (and perhaps other versions) will crash after
-         * a little while if we don't do this.  Memory usage stays
-         * pretty level using this technique.
-         *
-         * Chrome prefers to reuse the same object. */
-        if (window.XDomainRequest) {
-            delete this.xhrobj;
-        }
-
-        /* Reset state of this object */
-        this._reset_state();
-
-        /* Set up a fresh XHR/XDR object if we are on Windows.  See
-         * comment above for explanation. */
-        if (window.XDomainRequest) {
-            this.xhrobj = this._create_xhr();
-        }
+        this._frame_off = 0;    // Current frame offset
+        this._data_off = -1;    // Current data block offset
+        this._data_len = -1;    // Current data block length
+        this._seq = 0;          // Sequence number for current data frame
+        this._channel = "";     // Channel name for current data frame
     },
 
     /* Create a compatible XHR/XDR object for our use */
@@ -175,9 +180,9 @@ TCStreamPath.prototype = {
     /* Dispatch events to proper handlers, including reference */
     _handle_progress: function(event) {
         /* Response codes 400-499 indicate a fatal error */
-        if ('status' in this.xhrobj &&
-            this.xhrobj.status >= 400 && this.xhrobj.status < 500) {
-            this.onfatalerror(this.ref)
+        if ('status' in this._xhrobj &&
+            this._xhrobj.status >= 400 && this._xhrobj.status < 500) {
+            this.onfatalerror(this._ref)
             return;
         }
 
@@ -187,28 +192,28 @@ TCStreamPath.prototype = {
 
     _handle_pathend: function(event) {
         /* Response codes 400-499 indicate a fatal error */
-        if ('status' in this.xhrobj &&
-            this.xhrobj.status >= 400 && this.xhrobj.status < 500) {
-            this.onfatalerror(this.ref)
+        if ('status' in this._xhrobj &&
+            this._xhrobj.status >= 400 && this._xhrobj.status < 500) {
+            this.onfatalerror(this._ref)
             return;
         }
 
         /* Sanity check what the browser is telling us */
-        if (this.frame_off != this.rt.length) {
+        if (this._frame_off != this._rt.length) {
             throw new Error("_handle_pathend: Frame offset is not equal to "
                             + "responseText length");
         }
 
         /* We've parsed all data, so trigger the end-of-path
          * handler */
-        this.onpathend(this.ref);
+        this.onpathend(this._ref);
     },
 
     _handle_timeout: function(event) {
-        this.ontimeout(this.ref, event)
+        this.ontimeout(this._ref, event)
     },
     _handle_error: function() {
-        this.onerror(this.ref)
+        this.onerror(this._ref)
     },
 
     _sched_parse_path: function(ms) {
@@ -219,27 +224,27 @@ TCStreamPath.prototype = {
     /* Not for general use: only a separate function for profiling
      * purposes */
     _save_responseText: function() {
-        this.rt = this.xhrobj.responseText;
+        this._rt = this._xhrobj.responseText;
     },
 
     _parse_path: function() {
         /* We are only allowed to run once every 100ms so that we
          * don't destroy the browser's CPU */
         var now = (new Date()).getTime();
-        var diff = now - this.last_parse;
+        var diff = now - this._last_parse;
         if (diff < 100) {
             /* 100ms haven't passed yet.  Reschedule _parse_path() if
              * it has not already been done */
-            if (this.last_parse_timer === undefined) {
-                this.last_parse_timer = this._sched_parse_path(100 - diff + 5);
+            if (this._last_parse_timer === undefined) {
+                this._last_parse_timer = this._sched_parse_path(100 - diff + 5);
             }
             return;
         }
 
         /* Cancel outstanding parse timer if set */
-        if (this.last_parse_timer != undefined) {
-            clearTimeout(this.last_parse_timer);
-            this.last_parse_timer = undefined;
+        if (this._last_parse_timer != undefined) {
+            clearTimeout(this._last_parse_timer);
+            this._last_parse_timer = undefined;
         }
 
         /* Save aside current response text.  This is Very Important
@@ -256,9 +261,9 @@ TCStreamPath.prototype = {
         this._save_responseText();
 
         var i = 0;
-        while (this.frame_off != this.rt.length) {
+        while (this._frame_off != this._rt.length) {
             try {
-                switch (this.state) {
+                switch (this._path_state) {
                     case 'sync_frame':    this._parse_sync_frame();    break;
                     case 'sync_payload':  this._parse_sync_payload();  break;
                     case 'nonce_frame':   this._parse_nonce_frame();   break;
@@ -282,7 +287,7 @@ TCStreamPath.prototype = {
         }
 
         /* Set last parse time */
-        this.last_parse = (new Date()).getTime();
+        this._last_parse = (new Date()).getTime();
     },
 
     /* Wrap parseInt() so that it fails on any string that does not
@@ -356,18 +361,18 @@ TCStreamPath.prototype = {
          * Find version
          */
         try {
-            var hdr = this._get_next_int_header(this.rt, pos, ' ',
-                                                this.max_version_len);
+            var hdr = this._get_next_int_header(this._rt, pos, ' ',
+                                                this._max_version_len);
             var ver = hdr.integer;
         } catch (e) {
             switch (e) {
             case 'length_exceeded':
-                this.xhrobj.abort();
+                this._xhrobj.abort();
                 throw new Error("Invalid frame header while waiting on " +
                                 "SYNC frame");
                 break;
             case 'not_an_integer':
-                this.xhrobj.abort();
+                this._xhrobj.abort();
                 throw new Error("Invalid version number: `" + hdr.string + "'");
                 break;
             default:
@@ -376,7 +381,7 @@ TCStreamPath.prototype = {
             }
         }
         if (ver != 1) {
-            this.xhrobj.abort();
+            this._xhrobj.abort();
             throw new Error("Unsupported TCStreamSession protocol version: `"
                             + ver + "'");
         }
@@ -386,14 +391,14 @@ TCStreamPath.prototype = {
          * Find SYNC frame indicator
          */
         try {
-            var hdr = this._get_next_header(this.rt, pos, ' ',
-                                            this.max_frametype_len);
+            var hdr = this._get_next_header(this._rt, pos, ' ',
+                                            this._max_frametype_len);
             var frame = hdr.string;
         }
         catch (e) {
             switch (e) {
             case 'length_exceeded':
-                this.xhrobj.abort();
+                this._xhrobj.abort();
                 throw new Error("Invalid frame header while waiting on " +
                                 "SYNC frame");
                 break;
@@ -403,7 +408,7 @@ TCStreamPath.prototype = {
             }
         }
         if (frame != 'S') {
-            this.xhrobj.abort();
+            this._xhrobj.abort();
             throw new Error("Unexpected frame type: `" + frame + "' " +
                             "(expected `S' for SYNC frame)");
         }
@@ -413,18 +418,18 @@ TCStreamPath.prototype = {
          * Find length field
          */
         try {
-            var hdr = this._get_next_int_header(this.rt, pos, ' ',
-                                                this.max_length_len);
+            var hdr = this._get_next_int_header(this._rt, pos, ' ',
+                                                this._max_length_len);
             var datalen = hdr.integer;
         } catch (e) {
             switch (e) {
             case 'length_exceeded':
-                this.xhrobj.abort();
+                this._xhrobj.abort();
                 throw new Error("Invalid frame header while waiting on " +
                                 "SYNC frame");
                 break;
             case 'not_an_integer':
-                this.xhrobj.abort();
+                this._xhrobj.abort();
                 throw new Error("Invalid data length: `" + hdr.string + "'");
                 break;
             default:
@@ -434,29 +439,29 @@ TCStreamPath.prototype = {
         }
         pos = hdr.next + 1;
 
-        this.ver = ver;
-        this.data_off = pos;
-        this.data_len = datalen;
+        this._ver = ver;
+        this._data_off = pos;
+        this._data_len = datalen;
 
-        this.state = 'sync_payload';
+        this._path_state = 'sync_payload';
         this._parse_sync_payload();
     },
 
     _parse_sync_payload: function() {
-        var data_end = this.data_off + this.data_len;
-        if (data_end > this.rt.length) {
+        var data_end = this._data_off + this._data_len;
+        if (data_end > this._rt.length) {
             /* Not enough data has arrived, wait for next event */
             throw 'no_data';
         }
-        this.frame_off = data_end;
+        this._frame_off = data_end;
 
         /* Notify user that this path is synced */
         var thisxhr = this;
-        var ref = this.ref;
+        var ref = this._ref;
         setTimeout(function() { thisxhr.onsync(ref); }, 0);
 
         /* Set next processing stage */
-        this.state = 'nonce_frame';
+        this._path_state = 'nonce_frame';
     },
 
     /* Initial NONCE frame parsing */
@@ -468,20 +473,20 @@ TCStreamPath.prototype = {
          *
          * There should be exactly one space between each field.
          */
-        var pos = this.frame_off;
+        var pos = this._frame_off;
 
         /*
          * Find NONCE frame indicator
          */
         try {
-            var hdr = this._get_next_header(this.rt, pos, ' ',
-                                            this.max_frametype_len);
+            var hdr = this._get_next_header(this._rt, pos, ' ',
+                                            this._max_frametype_len);
             var frame = hdr.string;
         }
         catch (e) {
             switch (e) {
             case 'length_exceeded':
-                this.xhrobj.abort();
+                this._xhrobj.abort();
                 throw new Error("Invalid frame header while waiting on " +
                                 "NONCE frame");
                 break;
@@ -491,7 +496,7 @@ TCStreamPath.prototype = {
             }
         }
         if (frame != 'N') {
-            this.xhrobj.abort();
+            this._xhrobj.abort();
             throw new Error("Unexpected frame type: `" + frame + "' " +
                             "(expected `N' for NONCE frame)");
         }
@@ -500,17 +505,17 @@ TCStreamPath.prototype = {
         /*
          * Get nonce
          */
-        var nonce = this.rt.substr(pos, 6);
+        var nonce = this._rt.substr(pos, 6);
 
-        this.frame_off = pos + 6;
+        this._frame_off = pos + 6;
 
         /* Submit nonce to consumer */
         var thisxhr = this;
-        var ref = this.ref;
+        var ref = this._ref;
         setTimeout(function() { thisxhr.onnonce(ref, nonce); }, 0);
 
         /* Set next processing stage */
-        this.state = 'data_frame';
+        this._path_state = 'data_frame';
     },
 
     /* Initial DATA frame parsing */
@@ -524,20 +529,20 @@ TCStreamPath.prototype = {
          *
          * There should be exactly one space between each field.
          */
-        var pos = this.frame_off;
+        var pos = this._frame_off;
 
         /*
          * Find DATA frame indicator
          */
         try {
-            var hdr = this._get_next_header(this.rt, pos, ' ',
-                                            this.max_frametype_len);
+            var hdr = this._get_next_header(this._rt, pos, ' ',
+                                            this._max_frametype_len);
             var frame = hdr.string;
         }
         catch (e) {
             switch (e) {
             case 'length_exceeded':
-                this.xhrobj.abort();
+                this._xhrobj.abort();
                 throw new Error("Invalid frame header while waiting on " +
                                 "DATA frame");
                 break;
@@ -547,7 +552,7 @@ TCStreamPath.prototype = {
             }
         }
         if (frame != 'D') {
-            this.xhrobj.abort();
+            this._xhrobj.abort();
             throw new Error("Unexpected frame type: `" + frame + "' " +
                             "(expected `D' for DATA frame)");
         }
@@ -557,18 +562,18 @@ TCStreamPath.prototype = {
          * Find sequence number
          */
         try {
-            var hdr = this._get_next_int_header(this.rt, pos, ' ',
-                                                this.max_length_len);
+            var hdr = this._get_next_int_header(this._rt, pos, ' ',
+                                                this._max_length_len);
             var seq = hdr.integer;
         } catch (e) {
             switch (e) {
             case 'length_exceeded':
-                this.xhrobj.abort();
+                this._xhrobj.abort();
                 throw new Error("Invalid frame header while waiting on " +
                                 "DATA frame");
                 break;
             case 'not_an_integer':
-                this.xhrobj.abort();
+                this._xhrobj.abort();
                 throw new Error("Invalid data length: `" + hdr.string + "'");
                 break;
             default:
@@ -576,21 +581,21 @@ TCStreamPath.prototype = {
                 break;
             }
         }
-        this.seq = seq;
+        this._seq = seq;
         pos = hdr.next + 1;
 
         /*
          * Find channel name
          */
         try {
-            var hdr = this._get_next_header(this.rt, pos, ' ',
-                                            this.max_channel_len);
+            var hdr = this._get_next_header(this._rt, pos, ' ',
+                                            this._max_channel_len);
             var channel = hdr.string;
         }
         catch (e) {
             switch (e) {
             case 'length_exceeded':
-                this.xhrobj.abort();
+                this._xhrobj.abort();
                 throw new Error("Invalid frame header while waiting on " +
                                 "DATA frame");
                 break;
@@ -599,25 +604,25 @@ TCStreamPath.prototype = {
                 break;
             }
         }
-        this.channel = channel;
+        this._channel = channel;
         pos = hdr.next + 1;
 
         /*
          * Find length field
          */
         try {
-            var hdr = this._get_next_int_header(this.rt, pos, ' ',
-                                                this.max_length_len);
+            var hdr = this._get_next_int_header(this._rt, pos, ' ',
+                                                this._max_length_len);
             var datalen = hdr.integer;
         } catch (e) {
             switch (e) {
             case 'length_exceeded':
-                this.xhrobj.abort();
+                this._xhrobj.abort();
                 throw new Error("Invalid frame header while waiting on " +
                                 "DATA frame");
                 break;
             case 'not_an_integer':
-                this.xhrobj.abort();
+                this._xhrobj.abort();
                 throw new Error("Invalid data length: `" + hdr.string + "'");
                 break;
             default:
@@ -627,33 +632,33 @@ TCStreamPath.prototype = {
         }
         pos = hdr.next + 1;
 
-        this.data_off = pos;
-        this.data_len = datalen;
+        this._data_off = pos;
+        this._data_len = datalen;
 
-        this.state = 'data_payload';
+        this._path_state = 'data_payload';
         this._parse_data_payload();
     },
 
     _parse_data_payload: function() {
-        var data_end = this.data_off + this.data_len;
-        if (data_end > this.rt.length) {
+        var data_end = this._data_off + this._data_len;
+        if (data_end > this._rt.length) {
             /* Not enough data has arrived, wait for next event */
             throw 'no_data';
         }
-        this.frame_off = data_end;
+        this._frame_off = data_end;
 
         var thisxhr = this;
 
         /* Submit data to consumer */
-        var data = this.rt.substr(this.data_off, this.data_len);
-        var ref = this.ref;
-        var channel = this.channel;
-        var seq = this.seq;
+        var data = this._rt.substr(this._data_off, this._data_len);
+        var ref = this._ref;
+        var channel = this._channel;
+        var seq = this._seq;
         setTimeout(function() { thisxhr.onframe(ref, seq, channel, data); }, 0);
 
         /* Set next processing stage, and trigger in case data is
          * already here */
-        this.state = 'data_frame';
+        this._path_state = 'data_frame';
     }
 }
 
@@ -664,7 +669,7 @@ function TCStreamSession(url) {
     this._url = url;
     this.body = "";
 
-    /* Event handlers */
+    /* Event handlers, settable by caller */
     this.onwarning = new Function();
     this.onwarningcleared = new Function();
     this.onerror = new Function();
@@ -677,25 +682,25 @@ function TCStreamSession(url) {
 
     /* Stream state */
     this.state = 'stopped';
-    this.recovery_pause = 2000;
-    this.recovery_timer = undefined;
-    this.last_seq = 0;
-    this.next_nonce = "000000";
-    this.need_nonce = false;
-    this.need_reconnect = false;
+    this.recovery_interval = 2000;
+    this._recovery_timer = undefined;
+    this._last_seq = 0;
+    this._next_nonce = "000000";
+    this._need_nonce = false;
+    this._need_reconnect = false;
 
     /* Warning state */
     this.warning_time = 5000;
-    this.warning = 'cleared';
-    this.warning_timer = undefined;
+    this._warning_state = 'cleared';
+    this._warning_timer = undefined;
 
     /* Error handling */
     this.error_time = 30000;
-    this.error_timer = undefined;
+    this._error_timer = undefined;
 
     /* Inactivity handling */
     this.inact_time = 8000;
-    this.inact_timer = undefined;
+    this._inact_timer = undefined;
 }
 
 TCStreamSession.prototype = {
@@ -733,7 +738,7 @@ TCStreamSession.prototype = {
 
     /* Acknowledge a message */
     ack: function(seq) {
-        this.last_seq = seq;
+        this._last_seq = seq;
     },
 
 
@@ -745,7 +750,7 @@ TCStreamSession.prototype = {
         var stream = this;
 
         if (this._path[ref] != undefined) {
-            this._path[ref]._reset();
+            this._path[ref].reset();
         } else {
             this._path[ref] = new TCStreamPath(ref, this);
         }
@@ -773,10 +778,10 @@ TCStreamSession.prototype = {
             stream._handle_frame(ref, seq, channel, data);
         };
 
-        var data = "" + this.next_nonce
-                + " " + this.last_seq
+        var data = "" + this._next_nonce
+                + " " + this._last_seq
                 + " " + this.body;
-        this.need_nonce = true;
+        this._need_nonce = true;
         this._path[ref].connect('POST', this._url, data);
     },
 
@@ -796,14 +801,15 @@ TCStreamSession.prototype = {
             /* Schedule immediate recovery attempt on transtion
              * between active and recovery states */
             this.state = 'recovery';
-            if (this.recovery_timer === undefined) {
-                this.recovery_timer = this._sched_recovery(0);
+            if (this._recovery_timer === undefined) {
+                this._recovery_timer = this._sched_recovery(0);
             }
         } else {
             /* We're already in recovery mode, schedule a recovery
              * attempt if not already outstanding */
-            if (this.recovery_timer === undefined) {
-                this.recovery_timer = this._sched_recovery(this.recovery_pause);
+            if (this._recovery_timer === undefined) {
+                this._recovery_timer =
+                    this._sched_recovery(this.recovery_interval);
             }
         }
     },
@@ -815,11 +821,11 @@ TCStreamSession.prototype = {
 
     /* Handle end of individual path */
     _handle_path_end: function(ref) {
-        if (this.state === 'active' && this.need_nonce === false) {
-            this.need_reconnect = false;
+        if (this.state === 'active' && this._need_nonce === false) {
+            this._need_reconnect = false;
             this._reconnect_path(ref);
         } else {
-            this.need_reconnect = true;
+            this._need_reconnect = true;
         }
     },
 
@@ -827,9 +833,9 @@ TCStreamSession.prototype = {
     _handle_sync: function(ref) {
         /* Cancel any pending recovery, warning, and error timers, as
          * we may have just recovered from a failure state */
-        if (this.recovery_timer != undefined) {
-            clearTimeout(this.recovery_timer);
-            this.recovery_timer = undefined;
+        if (this._recovery_timer != undefined) {
+            clearTimeout(this._recovery_timer);
+            this._recovery_timer = undefined;
         }
         this._cancel_warning_timer();
         this._cancel_error_timer();
@@ -840,8 +846,8 @@ TCStreamSession.prototype = {
 
         /* If sequence number is at zero (because this is a brand new
          * session), set it to 1 */
-        if (this.last_seq === 0) {
-            this.last_seq = 1;
+        if (this._last_seq === 0) {
+            this._last_seq = 1;
         }
 
         /* Finally, set session state to `active' */
@@ -850,15 +856,15 @@ TCStreamSession.prototype = {
 
     /* Handle new nonce */
     _handle_nonce: function(ref, nonce) {
-        this.next_nonce = nonce;
+        this._next_nonce = nonce;
 
         /* We are no longer waiting on a nonce */
-        this.need_nonce = false;
+        this._need_nonce = false;
 
-        if (this.need_reconnect === true) {
+        if (this._need_reconnect === true) {
             /* If we were waiting on a nonce to reconnect the other
              * path, do so now */
-            this.need_reconnect = false;
+            this._need_reconnect = false;
             if (ref === 0) {
                 this._reconnect_path(1);
             } else {
@@ -884,14 +890,14 @@ TCStreamSession.prototype = {
     /* Cancel warning timer if set, and notify owner that warning has
      * been cleared */
     _cancel_warning_timer: function() {
-        if (this.warning_timer != undefined) {
-            clearTimeout(this.warning_timer);
-            this.warning_timer = undefined;
+        if (this._warning_timer != undefined) {
+            clearTimeout(this._warning_timer);
+            this._warning_timer = undefined;
 
             /* If warning was raised to owner, call warning cleared
              * handler */
-            if (this.warning === 'active') {
-                this.warning = 'cleared';
+            if (this._warning_state === 'active') {
+                this._warning_state = 'cleared';
                 
                 /* Call owner's warning cleared handler */
                 var stream = this;
@@ -902,22 +908,22 @@ TCStreamSession.prototype = {
 
     /* Set warning timer if not already set; otherwise, do nothing */
     _set_warning_timer: function() {
-        if (this.warning_timer === undefined) {
-            this.warning_timer = this._sched_warning(this.warning_time);
+        if (this._warning_timer === undefined) {
+            this._warning_timer = this._sched_warning(this.warning_time);
         }
     },
 
     _cancel_error_timer: function() {
-        if (this.error_timer != undefined) {
-            clearTimeout(this.error_timer);
-            this.error_timer = undefined;
+        if (this._error_timer != undefined) {
+            clearTimeout(this._error_timer);
+            this._error_timer = undefined;
         }
     },
 
     /* Set error timer if not already set; otherwise, do nothing */
     _set_error_timer: function() {
-        if (this.error_timer === undefined) {
-            this.error_timer = this._sched_error(this.error_time);
+        if (this._error_timer === undefined) {
+            this._error_timer = this._sched_error(this.error_time);
         }
     },
 
@@ -927,7 +933,7 @@ TCStreamSession.prototype = {
     },
 
     _warning: function() {
-        this.warning = 'active';
+        this._warning_state = 'active';
 
         /* Schedule owner's warning state handler */
         var stream = this;
@@ -957,43 +963,41 @@ TCStreamSession.prototype = {
         /* Shut down all connections */
         for (var i = 0; i < 2; i++) {
             if (this._path[i] != undefined) {
-                /* xhrobj property will not exist if we are starting
-                 * up for the first time */
-                this._path[i].xhrobj.abort();
+                this._path[i].disconnect();
             }
         }
 
         /* Cancel all outstanding timers (do this directly to avoid
          * special handling in _cancel_*_timer functions) */
-        if (this.recovery_timer != undefined) {
-            clearTimeout(this.recovery_timer);
-            this.recovery_timer = undefined;
+        if (this._recovery_timer != undefined) {
+            clearTimeout(this._recovery_timer);
+            this._recovery_timer = undefined;
         }
-        if (this.warning_timer != undefined) {
-            clearTimeout(this.warning_timer);
-            this.warning_timer = undefined;
+        if (this._warning_timer != undefined) {
+            clearTimeout(this._warning_timer);
+            this._warning_timer = undefined;
         }
-        if (this.error_timer != undefined) {
-            clearTimeout(this.error_timer);
-            this.error_timer = undefined;
+        if (this._error_timer != undefined) {
+            clearTimeout(this._error_timer);
+            this._error_timer = undefined;
         }
-        if (this.inact_timer != undefined) {
-            clearTimeout(this.inact_timer);
-            this.inact_timer = undefined;
+        if (this._inact_timer != undefined) {
+            clearTimeout(this._inact_timer);
+            this._inact_timer = undefined;
         }
     },
 
     _cancel_inact_timer: function() {
-        if (this.inact_timer != undefined) {
-            clearTimeout(this.inact_timer);
-            this.inact_timer = undefined;
+        if (this._inact_timer != undefined) {
+            clearTimeout(this._inact_timer);
+            this._inact_timer = undefined;
         }
     },
 
     /* Set inact timer if not already set; otherwise, do nothing */
     _set_inact_timer: function() {
-        if (this.inact_timer === undefined) {
-            this.inact_timer = this._sched_inact(this.inact_time);
+        if (this._inact_timer === undefined) {
+            this._inact_timer = this._sched_inact(this.inact_time);
         }
     },
 
@@ -1015,27 +1019,20 @@ TCStreamSession.prototype = {
     /* Connection failure recovery.  This function should only ever be
      * called by way of _sched_recover() */
     _recover: function() {
-        this.recovery_timer = undefined;
-
-        /* Debug */
-        /* if ('dcount' in window) {
-            delete window.dcount;
-        } */
+        this._recovery_timer = undefined;
 
         for (var i = 0; i < 2; i++) {
             if (this._path[i] != undefined) {
-                /* xhrobj property will not exist if we are starting
-                 * up for the first time */
-                this._path[i].xhrobj.abort();
+                this._path[i].disconnect();
             }
         }
 
         /* Reset the nonce to indicate we're in recovery mode */
-        this.next_nonce = "000000";
+        this._next_nonce = "000000";
         this._reconnect_path(0);
-        this.need_reconnect = true;
-        this.need_nonce = true;
+        this._need_reconnect = true;
+        this._need_nonce = true;
 
-        this.recovery_timer = this._sched_recovery(this.recovery_pause);
+        this._recovery_timer = this._sched_recovery(this.recovery_interval);
     }
 }
