@@ -28,8 +28,6 @@
          connected_1_0/2, connected_1_0/3]).
 
 -define(SERVER, ?MODULE).
--define(IDLE_PATH_TIMEOUT, 5000).
--define(CLOSE_TIMEOUT, 35000). %% Slightly larger than the client error timeout
 -define(NONCE_LEN, 6).
 -define(NONCE_CHARS, "ABCDEFGHIJKLMNOPQRSTUVWXYZ123456789").
 
@@ -42,7 +40,7 @@
                 next_nonce = <<"000000">>,
                 path0 = undefined,
                 path1 = undefined,
-                path_limit = 204800,
+                path_limit = tcstream:get_path_limit(),
                 path_bytes = 0,
                 idle_path_tref = undefined,
                 close_tref = undefined}).
@@ -62,8 +60,8 @@ new_session(ID, Path0Pid, Mod, Args) ->
 
         {error, {already_started, Pid}} ->
             %% Ask existing session to shut down so we can replace it
-            error_logger:info_msg("Shutting down old instance of session ID ~s",
-                                  [ID]),
+            error_logger:info_msg("Shutting down old instance of session "
+                                  "ID ~s\n", [ID]),
             ok = gen_fsm:sync_send_all_state_event(Pid, shutdown),
             new_session(ID, Path0Pid, Mod, Args);
 
@@ -182,7 +180,8 @@ code_change(_OldVsn, StateName, StateData, _Extra) ->
 
 %% Entry point - runs when entering state from any other state
 enter_connected_0(StateData) ->
-    NewStateData = reset_idle_path_timeout(?IDLE_PATH_TIMEOUT, StateData),
+    NewStateData = reset_idle_path_timeout(tcstream:get_idle_path_timeout(),
+                                           StateData),
     {next_state, connected_0, NewStateData}.
 enter_connected_0(Reply, StateData) ->
     {_, State, NewStateData} = enter_connected_0(StateData),
@@ -191,7 +190,7 @@ enter_connected_0(Reply, StateData) ->
 %% Idle path timeout
 connected_0(idle_path_timeout, StateData) ->
     StateData2 = cancel_idle_path_timeout(StateData),
-    StateData3 = reset_close_timeout(?CLOSE_TIMEOUT, StateData2),
+    StateData3 = reset_close_timeout(tcstream:get_close_timeout(), StateData2),
     {next_state, connected_0, StateData3};
 
 %% Only Path0 is connected.  Send data and update byte count.
@@ -214,7 +213,8 @@ connected_0({newconn, NewPid, Nonce, _Seq}, _From,
                    path_limit     = PathLimit} = StateData)
   when PathBytes < PathLimit,
        IdlePathTRef =/= undefined ->
-    StateData2 = reset_idle_path_timeout(?IDLE_PATH_TIMEOUT, StateData),
+    StateData2 = reset_idle_path_timeout(tcstream:get_idle_path_timeout(),
+                                         StateData),
     StateData3 = cancel_close_timeout(StateData2),
     enter_connected_0_1(ok, StateData3#state{path1 = NewPid});
 
@@ -268,7 +268,8 @@ connected_0_1({newconn, _NewPid, _Nonce, _Seq}, _From, StateData) ->
 
 %% Entry point - runs when entering state from any other state
 enter_connected_1(StateData) ->
-    NewStateData = reset_idle_path_timeout(?IDLE_PATH_TIMEOUT, StateData),
+    NewStateData = reset_idle_path_timeout(tcstream:get_idle_path_timeout(),
+                                           StateData),
     {next_state, connected_1, NewStateData}.
 enter_connected_1(Reply, StateData) ->
     {_, State, NewStateData} = enter_connected_1(StateData),
@@ -277,7 +278,7 @@ enter_connected_1(Reply, StateData) ->
 %% Idle path timeout
 connected_1(idle_path_timeout, StateData) ->
     StateData2 = cancel_idle_path_timeout(StateData),
-    StateData3 = reset_close_timeout(?CLOSE_TIMEOUT, StateData2),
+    StateData3 = reset_close_timeout(tcstream:get_close_timeout(), StateData2),
     {next_state, connected_1, StateData3};
 
 %% Only Path1 is connected.  Send data and update byte count.
@@ -300,7 +301,8 @@ connected_1({newconn, NewPid, Nonce, _Seq}, _From,
                    path_limit     = PathLimit} = StateData)
   when PathBytes < PathLimit,
        IdlePathTRef =/= undefined ->
-    StateData2 = reset_idle_path_timeout(?IDLE_PATH_TIMEOUT, StateData),
+    StateData2 = reset_idle_path_timeout(tcstream:get_idle_path_timeout(),
+                                         StateData),
     StateData3 = cancel_close_timeout(StateData2),
     enter_connected_1_0(ok, StateData3#state{path0 = NewPid});
 
