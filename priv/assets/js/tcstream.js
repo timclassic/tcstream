@@ -179,25 +179,11 @@ TCStreamPath.prototype = {
 
     /* Dispatch events to proper handlers, including reference */
     _handle_progress: function(event) {
-        /* Response codes 400-499 indicate a fatal error */
-        if ('status' in this._xhrobj &&
-            this._xhrobj.status >= 400 && this._xhrobj.status < 500) {
-            this.onfatalerror(this._ref)
-            return;
-        }
-
         /* Proceed with usual protocol handling */
         this._parse_path();
     },
 
     _handle_pathend: function(event) {
-        /* Response codes 400-499 indicate a fatal error */
-        if ('status' in this._xhrobj &&
-            this._xhrobj.status >= 400 && this._xhrobj.status < 500) {
-            this.onfatalerror(this._ref)
-            return;
-        }
-
         /* Sanity check what the browser is telling us */
         if (this._frame_off != this._rt.length) {
             throw new Error("_handle_pathend: Frame offset is not equal to "
