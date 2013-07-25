@@ -524,8 +524,7 @@ TCStreamPath.prototype = {
             var hdr = this._get_next_header(this._rt, pos, ' ',
                                             this._max_frametype_len);
             var frame = hdr.string;
-        }
-        catch (e) {
+        } catch (e) {
             switch (e) {
             case 'length_exceeded':
                 this._xhrobj.abort();
@@ -577,8 +576,7 @@ TCStreamPath.prototype = {
             var hdr = this._get_next_header(this._rt, pos, ' ',
                                             this._max_channel_len);
             var channel = hdr.string;
-        }
-        catch (e) {
+        } catch (e) {
             switch (e) {
             case 'length_exceeded':
                 this._xhrobj.abort();
@@ -884,7 +882,7 @@ TCStreamSession.prototype = {
              * handler */
             if (this._warning_state === 'active') {
                 this._warning_state = 'cleared';
-                
+
                 /* Call owner's warning cleared handler */
                 var stream = this;
                 setTimeout(function() { stream.onwarningcleared(); }, 0);
@@ -944,7 +942,7 @@ TCStreamSession.prototype = {
         var stream = this;
         setTimeout(function() { stream.onerror(); }, 0);
     },
-        
+
     _terminate_stream: function() {
         /* Shut down all connections */
         for (var i = 0; i < 2; i++) {
