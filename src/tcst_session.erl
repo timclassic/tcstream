@@ -104,7 +104,12 @@ continue_session(ID, Nonce, Seq, PathPid) ->
                     error_logger:info_msg("Connection attempt to full session "
                                           "ID ~s, ignoring (Page Reload on "
                                           "Firefox??)\n", [ID]),
-                    session_full
+                    session_full;
+                bad_nonce ->
+                    error_logger:info_msg("Connection attempt with bad nonce "
+                                          "~s for session ID ~s, ignoring\n",
+                                          [Nonce, ID]),
+                    bad_nonce
             end
     end.
 
@@ -230,6 +235,13 @@ connected_0({newconn, NewPid, Nonce, _Seq}, _From,
                                              path1      = NewPid,
                                              path_bytes = 0}).
 
+%% Path0 is connected, and Path1 has just connected, but with an
+%% incorrect nonce.
+connected_0({newconn, _NewPid, BadNonce, _Seq}, _From,
+            #state{next_nonce = Nonce} = StateData)
+  when BadNonce =/= Nonce ->
+    {reply, bad_nonce, connected_0, StateData}.
+
 
 %% Entry point - runs when entering state from any other state
 enter_connected_0_1(StateData) ->
@@ -317,6 +329,13 @@ connected_1({newconn, NewPid, Nonce, _Seq}, _From,
     enter_connected_0(ok, NewStateData#state{path0      = NewPid,
                                              path1      = undefined,
                                              path_bytes = 0}).
+
+%% Path1 is connected, and Path0 has just connected, but with an
+%% incorrect nonce.
+connected_1({newconn, _NewPid, BadNonce, _Seq}, _From,
+            #state{next_nonce = Nonce} = StateData)
+  when BadNonce =/= Nonce ->
+    {reply, bad_nonce, connected_1, StateData}.
 
 
 %% Entry point - runs when entering state from any other state

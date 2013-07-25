@@ -121,13 +121,16 @@ process_post(ReqData, #context{module = Mod, args = Args} = Context) ->
             end;
         {_, _} ->
             %% Existing session
+            error_logger:info_msg("New POST with nonce ~p\n", [Nonce]),
             case tcst_session:continue_session(Body, Nonce, Seq, self()) of
                 {ok, Pid} ->
                     post_return_with_stream(Pid, ReqData, Context);
                 session_full ->
                     post_return_with_session_full(ReqData, Context);
                 no_such_session ->
-                    post_return_with_no_session(ReqData, Context)
+                    post_return_with_no_session(ReqData, Context);
+                bad_nonce ->
+                    post_return_with_bad_nonce(ReqData, Context)
             end
     end.
 
@@ -156,6 +159,11 @@ post_return_with_stream(Pid, ReqData, Context) ->
 post_return_with_session_full(ReqData, Context) ->
     {{halt, 409},
      wrq:set_resp_body("ERROR: Two paths already connected", ReqData),
+     Context}.
+
+post_return_with_bad_nonce(ReqData, Context) ->
+    {{halt, 409},
+     wrq:set_resp_body("ERROR: Incorrect nonce", ReqData),
      Context}.
 
 post_return_with_no_session(ReqData, Context) ->
