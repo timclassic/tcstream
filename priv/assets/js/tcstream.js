@@ -4,7 +4,7 @@
 
 
 function TCStreamPath(ref, owner) {
-    this._ref = ref;                    // Opaque reference, used by owner
+    this._ref = ref;                    // Unique numeric reference, 0 or 1
     this._xhrobj = this._create_xhr();  // Get our actual object
 
     /* Max header length.  This constant indirectly controls the
@@ -35,14 +35,14 @@ TCStreamPath.prototype = {
      */
 
     /* Connect XHR/XDR object */
-    connect: function(method, url, body) {
+    connect: function(url, nonce, attempt, last_seq, body) {
         var streamxhr = this;
 
         /* Some docs specify that handlers should be specified before
          * the open() call (Mozilla) */
         this._set_xhrobj_handlers();
 
-        this._xhrobj.open(method, url + "/path" + this._ref, true);
+        this._xhrobj.open('POST', url + "/path" + this._ref, true);
 
         /* And other browsers require that they happen after (IE) */
         this._set_xhrobj_handlers();
@@ -55,7 +55,12 @@ TCStreamPath.prototype = {
             this._xhrobj.setRequestHeader("Content-Type",
                                          "text/plain;charset=UTF-8");
         }
-        this._xhrobj.send(body);
+
+        var data = "" + nonce
+                + " " + attempt
+                + " " + last_seq
+                + " " + body;
+        this._xhrobj.send(data);
     },
 
     /* Disconnect XHR/XDR object */
@@ -65,6 +70,8 @@ TCStreamPath.prototype = {
 
     /* Clean up TCStreamPath object */
     reset: function() {
+        this.disconnect();
+
         /* Clean up event handlers */
         if (window.XDomainRequest) {
             delete this._xhrobj.onload;
@@ -179,11 +186,31 @@ TCStreamPath.prototype = {
 
     /* Dispatch events to proper handlers, including reference */
     _handle_progress: function(event) {
+        /* Check response codes (Nothing to do here, yet) */
+        if ('status' in this._xhrobj) {
+            switch (this._xhrobj.status) {
+            case 0:
+            case 200:
+            default:
+                break;
+            }
+        }
+
         /* Proceed with usual protocol handling */
         this._parse_path();
     },
 
     _handle_pathend: function(event) {
+        /* Check response codes (Nothing to do here, yet) */
+        if ('status' in this._xhrobj) {
+            switch (this._xhrobj.status) {
+            case 0:
+            case 200:
+            default:
+                break;
+            }
+        }
+
         /* Sanity check what the browser is telling us */
         if (this._frame_off != this._rt.length) {
             throw new Error("_handle_pathend: Frame offset is not equal to "
@@ -667,6 +694,7 @@ function TCStreamSession(url) {
     /* Stream state */
     this.state = 'stopped';
     this.recovery_interval = 2000;
+    this._attempt = 0;
     this._recovery_timer = undefined;
     this._last_seq = 0;
     this._next_nonce = "000000";
@@ -762,11 +790,9 @@ TCStreamSession.prototype = {
             stream._handle_frame(ref, seq, channel, data);
         };
 
-        var data = "" + this._next_nonce
-                + " " + this._last_seq
-                + " " + this.body;
         this._need_nonce = true;
-        this._path[ref].connect('POST', this._url, data);
+        this._path[ref].connect(this._url, this._next_nonce, this._attempt,
+                                this._last_seq, this.body);
     },
 
     /* Handle request timeout */
@@ -1013,6 +1039,10 @@ TCStreamSession.prototype = {
 
         /* Reset the nonce to indicate we're in recovery mode */
         this._next_nonce = "000000";
+
+        /* Update attempt counter */
+        this._attempt++;
+
         this._reconnect_path(0);
         this._need_reconnect = true;
         this._need_nonce = true;

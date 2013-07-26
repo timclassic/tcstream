@@ -100,7 +100,9 @@ process_post(ReqData, #context{module = Mod, args = Args} = Context) ->
 
     %% Parse out nonce, sequence number, and body
     [Nonce, Data2] = binary:split(Data, [<<32>>], []),
-    [RawSeq, Body] = binary:split(Data2, [<<32>>], []),
+    [RawAttempt, Data3] = binary:split(Data2, [<<32>>], []),
+    [RawSeq, Body] = binary:split(Data3, [<<32>>], []),
+    Attempt = list_to_integer(binary_to_list(RawAttempt)),
     Seq = list_to_integer(binary_to_list(RawSeq)),
 
     case {Nonce, Seq} of
@@ -111,17 +113,18 @@ process_post(ReqData, #context{module = Mod, args = Args} = Context) ->
             post_return_with_stream(Pid, ReqData, Context);
         {<<"000000">>, _} ->
             %% Recovering session
-            case tcst_session:recover_session(Body, Seq, self()) of
+            case tcst_session:recover_session(Body, Attempt, Seq, self()) of
                 {ok, Pid} ->
                     post_return_with_stream(Pid, ReqData, Context);
                 session_full ->
                     post_return_with_session_full(ReqData, Context);
                 no_such_session ->
-                    post_return_with_no_session(ReqData, Context)
+                    post_return_with_no_session(ReqData, Context);
+                bad_attempt ->
+                    post_return_with_bad_attempt(ReqData, Context)
             end;
         {_, _} ->
             %% Existing session
-            error_logger:info_msg("New POST with nonce ~p\n", [Nonce]),
             case tcst_session:continue_session(Body, Nonce, Seq, self()) of
                 {ok, Pid} ->
                     post_return_with_stream(Pid, ReqData, Context);
@@ -164,6 +167,11 @@ post_return_with_session_full(ReqData, Context) ->
 post_return_with_bad_nonce(ReqData, Context) ->
     {{halt, 409},
      wrq:set_resp_body("ERROR: Incorrect nonce", ReqData),
+     Context}.
+
+post_return_with_bad_attempt(ReqData, Context) ->
+    {{halt, 409},
+     wrq:set_resp_body("ERROR: Bad (repeated?) recovery attempt", ReqData),
      Context}.
 
 post_return_with_no_session(ReqData, Context) ->
@@ -223,7 +231,7 @@ send_nonce(Z, SPid) ->
 
     %% Generate the next nonce and inform session of new value.
     Nonce = tcst_session:generate_nonce(),
-    ok = tcst_session:set_next_nonce(SPid, Nonce),
+    ok = tcst_session:set_nonce(SPid, Nonce),
 
     %% Send NONCE frame to client
     Frame = build_nonce_frame(Nonce),

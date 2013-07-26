@@ -11,10 +11,10 @@
 
 %% Public API
 -export([new_session/4,
-         recover_session/3,
+         recover_session/4,
          continue_session/4,
          generate_nonce/0,
-         set_next_nonce/2,
+         set_nonce/2,
          send/3]).
 
 %% gen_fsm callbacks
@@ -37,7 +37,8 @@
                 user_state,
                 msg_q = queue:new(),
                 seq = 2,
-                next_nonce = <<"000000">>,
+                nonce = <<"000000">>,
+                last_attempt = 0,
                 path0 = undefined,
                 path1 = undefined,
                 path_limit = tcstream:get_path_limit(),
@@ -69,12 +70,20 @@ new_session(ID, Path0Pid, Mod, Args) ->
             Error
     end.
 
-recover_session(ID, Seq, Path0Pid) ->
+recover_session(ID, Attempt, Seq, Path0Pid) ->
     try
         Pid = gproc:lookup_pid({n, l, {?MODULE, ID}}),
         true = link(Pid),
-        ok = gen_fsm:sync_send_all_state_event(Pid, {recover, Seq, Path0Pid}),
-        {ok, Pid}
+        case gen_fsm:sync_send_all_state_event(Pid, {recover, Attempt,
+                                                     Seq, Path0Pid}) of
+            ok ->
+                {ok, Pid};
+            bad_attempt ->
+                error_logger:info_msg("Detected old recovery attempt #~w for "
+                                      "session ID ~s, ignoring (probably an "
+                                      "overzealous browser)\n", [Attempt, ID]),
+                bad_attempt
+        end
     catch
         error:badarg ->
             error_logger:info_msg("Recovery attempt for nonexistent "
@@ -116,8 +125,8 @@ continue_session(ID, Nonce, Seq, PathPid) ->
 generate_nonce() ->
     list_to_binary(generate_random_string(?NONCE_LEN, ?NONCE_CHARS)).
 
-set_next_nonce(Pid, Nonce) ->
-    gen_fsm:sync_send_all_state_event(Pid, {set_next_nonce, Nonce}).
+set_nonce(Pid, Nonce) ->
+    gen_fsm:sync_send_all_state_event(Pid, {set_nonce, Nonce}).
 
 send(Pid, Channel, Data) ->
     gen_fsm:send_event(Pid, {send, Channel, Data}).
@@ -150,16 +159,25 @@ init([ID, Path0Pid, Mod, Args]) ->
 handle_event(_Event, StateName, StateData) ->
     {next_state, StateName, StateData}.
 
-handle_sync_event({set_next_nonce, Nonce}, _From, StateName, StateData) ->
-    {reply, ok, StateName, StateData#state{next_nonce = Nonce}};
-handle_sync_event({recover, _Seq, Path0Pid}, _From, _StateName, StateData) ->
+handle_sync_event({set_nonce, Nonce}, _From, StateName, StateData) ->
+    {reply, ok, StateName, StateData#state{nonce = Nonce}};
+
+handle_sync_event({recover, Attempt, _Seq, Path0Pid}, _From, _StateName,
+                  #state{last_attempt = LastAttempt} = StateData)
+  when Attempt > LastAttempt ->
     StateData2 = reset_paths(StateData),
     StateData3 = StateData2#state{path0 = Path0Pid},
     {_, State, StateData4} = enter_connected_0(StateData3),
-    {reply, ok, State, StateData4};
+    {reply, ok, State, StateData4#state{last_attempt = Attempt}};
+handle_sync_event({recover, _BadAttempt, _Seq, _Path0Pid},
+                  _From, StateName, StateData) ->
+    {reply, bad_attempt, StateName, StateData};
+
 handle_sync_event(shutdown, _From, _StateName, StateData) ->
     {stop, normal, ok, StateData};
-handle_sync_event(_Event, _From, StateName, StateData) ->
+
+handle_sync_event(Event, _From, StateName, StateData) ->
+    error_logger:warning_msg("Unknown handle_sync_event: ~p\n", [Event]),
     {reply, ok, StateName, StateData}.
 
 handle_info({timeout, TRef, close}, _StateName,
@@ -212,7 +230,7 @@ connected_0({send, Channel, Data},
 %% limit.  Record new Path1 connection and transition to
 %% connected_0_1.
 connected_0({newconn, NewPid, Nonce, _Seq}, _From,
-            #state{next_nonce     = Nonce,
+            #state{nonce          = Nonce,
                    idle_path_tref = IdlePathTRef,
                    path_bytes     = PathBytes,
                    path_limit     = PathLimit} = StateData)
@@ -227,18 +245,18 @@ connected_0({newconn, NewPid, Nonce, _Seq}, _From,
 %% Path1 has just connected.  Signal Path0 to shut down and transition
 %% to connected_1.
 connected_0({newconn, NewPid, Nonce, _Seq}, _From,
-            #state{next_nonce = Nonce,
-                   path0      = Path0Pid} = StateData) ->
+            #state{nonce = Nonce,
+                   path0 = Path0Pid} = StateData) ->
     ok = tcst_path:close(Path0Pid),
     NewStateData = cancel_close_timeout(StateData),
     enter_connected_1(ok, NewStateData#state{path0      = undefined,
                                              path1      = NewPid,
-                                             path_bytes = 0}).
+                                             path_bytes = 0});
 
 %% Path0 is connected, and Path1 has just connected, but with an
 %% incorrect nonce.
 connected_0({newconn, _NewPid, BadNonce, _Seq}, _From,
-            #state{next_nonce = Nonce} = StateData)
+            #state{nonce = Nonce} = StateData)
   when BadNonce =/= Nonce ->
     {reply, bad_nonce, connected_0, StateData}.
 
@@ -307,7 +325,7 @@ connected_1({send, Channel, Data},
 %% limit.  Record new Path0 connection and transition to
 %% connected_1_0.
 connected_1({newconn, NewPid, Nonce, _Seq}, _From,
-            #state{next_nonce     = Nonce,
+            #state{nonce          = Nonce,
                    idle_path_tref = IdlePathTRef,
                    path_bytes     = PathBytes,
                    path_limit     = PathLimit} = StateData)
@@ -322,18 +340,18 @@ connected_1({newconn, NewPid, Nonce, _Seq}, _From,
 %% Path0 has just connected.  Signal Path1 to shut down and transition
 %% to connected_0.
 connected_1({newconn, NewPid, Nonce, _Seq}, _From,
-            #state{next_nonce = Nonce,
-                   path1      = Path1Pid} = StateData) ->
+            #state{nonce = Nonce,
+                   path1 = Path1Pid} = StateData) ->
     ok = tcst_path:close(Path1Pid),
     NewStateData = cancel_close_timeout(StateData),
     enter_connected_0(ok, NewStateData#state{path0      = NewPid,
                                              path1      = undefined,
-                                             path_bytes = 0}).
+                                             path_bytes = 0});
 
 %% Path1 is connected, and Path0 has just connected, but with an
 %% incorrect nonce.
 connected_1({newconn, _NewPid, BadNonce, _Seq}, _From,
-            #state{next_nonce = Nonce} = StateData)
+            #state{nonce = Nonce} = StateData)
   when BadNonce =/= Nonce ->
     {reply, bad_nonce, connected_1, StateData}.
 
@@ -392,8 +410,10 @@ reset_paths(#state{path0 = Path0Pid, path1 = Path1Pid} = StateData) ->
     %% Cancel idle path timer
     NewStateData = cancel_idle_path_timeout(StateData),
 
-    %% Set path bytes to zero and return new state data
-    NewStateData#state{path_bytes = 0}.
+    %% Set path bytes to zero, reset nonce info, and return new state
+    %% data
+    NewStateData#state{path_bytes = 0,
+                       nonce      = <<"000000">>}.
 
 cancel_idle_path_timeout(#state{idle_path_tref = TRef} = StateData) ->
     ok = case TRef of
