@@ -63,6 +63,26 @@ TCStreamPath.prototype = {
         this._xhrobj.send(data);
     },
 
+    /* Free all resources for this Path */
+    destroy: function() {
+        if (this._xhrobj) {
+            this.disconnect();
+
+            /* Clean up event handlers */
+            if (window.XDomainRequest) {
+                delete this._xhrobj.onload;
+            } else {
+                delete this._xhrobj.onreadystatechange;
+            }
+            delete this._xhrobj.onprogress;
+            delete this._xhrobj.ontimeout;
+            delete this._xhrobj.onerror;
+
+            delete this._xhrobj;
+            this._xhrobj = null;
+        }
+    },
+
     /* Disconnect XHR/XDR object */
     disconnect: function() {
         this._xhrobj.abort();
@@ -1048,5 +1068,18 @@ TCStreamSession.prototype = {
         this._need_nonce = true;
 
         this._recovery_timer = this._sched_recovery(this.recovery_interval);
+    },
+
+    /* Free all resources for this Stream Session, including its Paths */
+    destroy: function() {
+        this._terminate_stream();
+
+        for (var i = 0; i < 2; i++) {
+            if (this._path[i] != undefined) {
+                this._path[i].destroy();
+            }
+        }
+
+        this._path = null;
     }
 }
