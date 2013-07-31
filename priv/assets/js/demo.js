@@ -1,4 +1,5 @@
 var i = 0;
+var last_num = -1;
 
 jQuery(function() {
     var URL = window.location.protocol + "//" +
@@ -21,6 +22,27 @@ jQuery(function() {
     stream.map('bar', function(seq, data) {
         //$("#streamit").append("<br />" + "Channel bar: " + data);
         //$("#streamit").append("b");
+
+        stream.ack(seq);
+    });
+    stream.map('counter', function(seq, data) {
+        i += data.length;
+
+        var spc = data.indexOf(' ', 0);
+        var counter = parseInt(data.substring(0, spc));
+
+        if (counter != last_num + 1) {
+            $("#streamit").append("Break in message sequence - counter: "
+                                  + counter + " last_num: " + last_num +
+                                 "<br />");
+        }
+        last_num = counter;
+
+        //$("#streamit").append(" " + counter);
+        if (i > 104857600) {
+            i = 0;
+            $("#streamit").append(" 100MB");
+        }
 
         stream.ack(seq);
     });

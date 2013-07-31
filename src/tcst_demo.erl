@@ -27,6 +27,9 @@ session_start(#state{args = [big]} = SessionState) ->
     SessionState#state{pid = Pid};
 session_start(#state{args = [small]} = SessionState) ->
     Pid = stream2(self(), 1),
+    SessionState#state{pid = Pid};
+session_start(#state{args = [counter]} = SessionState) ->
+    Pid = stream3(self(), 1),
     SessionState#state{pid = Pid}.
 
 session_end(#state{pid = Pid} = _SessionState) ->
@@ -202,4 +205,29 @@ stream2(Pid, Sleep) ->
                 end
         end,
     H = fun() -> F(F) end,
+    proc_lib:spawn_link(H).
+
+stream3(Pid, Sleep) ->
+    Blob = <<"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA">>,
+    F = fun(G, Acc) ->
+                Num = list_to_binary(integer_to_list(Acc)),
+                tcst_session:send(Pid, <<"counter">>,
+                                  <<Num/binary, " ", Blob/binary>>),
+                receive
+                    stop  ->
+                        error_logger:info_msg("Stopping stream3 (pid ~p)\n",
+                                              [self()]),
+                        ok
+                after
+                    Sleep -> G(G, Acc + 1)
+                end
+        end,
+    H = fun() -> F(F, 0) end,
     proc_lib:spawn_link(H).

@@ -217,7 +217,7 @@ TCStreamPath.prototype = {
         }
 
         /* Proceed with usual protocol handling */
-        this._parse_path();
+        this._parse_path(false);
     },
 
     _handle_pathend: function(event) {
@@ -230,6 +230,9 @@ TCStreamPath.prototype = {
                 break;
             }
         }
+
+        /* Process any remaining messages and ignore throttle */
+        this._parse_path(true);
 
         /* Sanity check what the browser is telling us */
         if (this._frame_off != this._rt.length) {
@@ -251,7 +254,7 @@ TCStreamPath.prototype = {
 
     _sched_parse_path: function(ms) {
         var thisxhr = this;
-        return setTimeout(function() { thisxhr._parse_path(); }, ms);
+        return setTimeout(function() { thisxhr._parse_path(false); }, ms);
     },
 
     /* Not for general use: only a separate function for profiling
@@ -260,18 +263,21 @@ TCStreamPath.prototype = {
         this._rt = this._xhrobj.responseText;
     },
 
-    _parse_path: function() {
-        /* We are only allowed to run once every 100ms so that we
-         * don't destroy the browser's CPU */
-        var now = (new Date()).getTime();
-        var diff = now - this._last_parse;
-        if (diff < 100) {
-            /* 100ms haven't passed yet.  Reschedule _parse_path() if
-             * it has not already been done */
-            if (this._last_parse_timer === undefined) {
-                this._last_parse_timer = this._sched_parse_path(100 - diff + 5);
+    _parse_path: function(no_throttle) {
+        /* Unless no_throttle is `true', We are only allowed to run
+         * once every 100ms so that we don't destroy the browser's
+         * CPU */
+        if (no_throttle === false) {
+            var now = (new Date()).getTime();
+            var diff = now - this._last_parse;
+            if (diff < 100) {
+                /* 100ms haven't passed yet.  Reschedule _parse_path()
+                 * if it has not already been done */
+                if (this._last_parse_timer === undefined) {
+                    this._last_parse_timer = this._sched_parse_path(100 - diff + 5);
+                }
+                return;
             }
-            return;
         }
 
         /* Cancel outstanding parse timer if set */
@@ -489,9 +495,7 @@ TCStreamPath.prototype = {
         this._frame_off = data_end;
 
         /* Notify user that this path is synced */
-        var thisxhr = this;
-        var ref = this._ref;
-        setTimeout(function() { thisxhr.onsync(ref); }, 0);
+        this.onsync(this._ref);
 
         /* Set next processing stage */
         this._path_state = 'nonce_frame';
@@ -543,9 +547,7 @@ TCStreamPath.prototype = {
         this._frame_off = pos + 6;
 
         /* Submit nonce to consumer */
-        var thisxhr = this;
-        var ref = this._ref;
-        setTimeout(function() { thisxhr.onnonce(ref, nonce); }, 0);
+        this.onnonce(this._ref, nonce);
 
         /* Set next processing stage */
         this._path_state = 'data_frame';
@@ -682,10 +684,7 @@ TCStreamPath.prototype = {
 
         /* Submit data to consumer */
         var data = this._rt.substr(this._data_off, this._data_len);
-        var ref = this._ref;
-        var channel = this._channel;
-        var seq = this._seq;
-        setTimeout(function() { thisxhr.onframe(ref, seq, channel, data); }, 0);
+        this.onframe(this._ref, this._seq, this._channel, data);
 
         /* Set next processing stage, and trigger in case data is
          * already here */
@@ -697,8 +696,10 @@ TCStreamPath.prototype = {
 function TCStreamSession(url) {
     /* XHR/XDR connections */
     this._path = new Array(2);
+    this._current_path = 0;
     this._url = url;
     this.body = "";
+    this._standby_msgs = new Array();
 
     /* Event handlers, settable by caller */
     this.onwarning = new Function();
@@ -851,6 +852,30 @@ TCStreamSession.prototype = {
 
     /* Handle end of individual path */
     _handle_path_end: function(ref) {
+        if (ref != this._current_path) {
+            throw new Error("Unexpected end of standby path");
+        }
+
+        /* Toggle the current path */
+        if (this._current_path === 0) {
+            this._current_path = 1;
+        } else {
+            this._current_path = 0;
+        }
+
+        /* Process any queued messages for alternate path */
+        if (this._standby_msgs.length > 0) {
+            for (var i = 0, len = this._standby_msgs.length; i < len; i++) {
+                var m = this._standby_msgs[i];
+                if (m.channel in this._channels) {
+                    this._channels[m.channel](m.seq, m.data)
+                } else {
+                    /* Unmapped channel, ignore data */
+                }
+            }
+            this._standby_msgs = new Array();
+        }
+
         if (this.state === 'active' && this._need_nonce === false) {
             this._need_reconnect = false;
             this._reconnect_path(ref);
@@ -909,11 +934,21 @@ TCStreamSession.prototype = {
         this._cancel_inact_timer();
         this._set_inact_timer();
 
-        /* Route frame to proper handler */
-        if (channel in this._channels) {
-            this._channels[channel](seq, data)
+        if (ref != this._current_path) {
+            /* If frame has arrived on standby path, add to queue */
+            this._standby_msgs[this._standby_msgs.length] = {
+                'seq':     seq,
+                'channel': channel,
+                'data':    data
+            };
+
         } else {
-            /* Unmapped channel, ignore data */
+            /* Otherwise, go ahead and route to proper handler */
+            if (channel in this._channels) {
+                this._channels[channel](seq, data)
+            } else {
+                /* Unmapped channel, ignore data */
+            }
         }
     },
 
@@ -1063,6 +1098,8 @@ TCStreamSession.prototype = {
         /* Update attempt counter */
         this._attempt++;
 
+        this._current_path = 0;
+        this._standby_msgs = new Array();
         this._reconnect_path(0);
         this._need_reconnect = true;
         this._need_nonce = true;
