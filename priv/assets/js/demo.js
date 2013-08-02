@@ -6,6 +6,39 @@ jQuery(function() {
               window.location.host + "/" + tcstream_variant;
     var stream = new TCStreamSession(URL);
 
+
+    /* Shut down stream gracefully upon reload.  We remove the handler
+     * before page unload so that we don't change caching behavior.
+     * See the following URL for some details on this approach:
+     * 
+     *   https://developer.mozilla.org/en-US/docs/Using_Firefox_1.5_caching#pagehide_event
+     */
+    var portableAddListener = function(event, handler) {
+        if (window.addEventListener) {
+            window.addEventListener(event, handler, false);
+        } else {
+            window.attachEvent("on" + event, handler);
+        }
+    }
+    var portableRemoveListener = function(event, handler) {
+        if (window.removeEventListener) {
+            window.removeEventListener(event, handler, false);
+        } else {
+            window.detachEvent("on" + event, handler);
+        }
+    }
+    var beforeunload_handler = function() {
+        stream.disconnect();
+        portableRemoveListener("beforeunload", beforeunload_handler);
+    }
+    var pageshow_handler = function() {
+        /* Add beforeunload handler in case of a cached page load */
+        portableAddListener("beforeunload", beforeunload_handler);
+    }
+    portableAddListener("beforeunload", beforeunload_handler);
+    portableAddListener("pageshow", pageshow_handler);
+
+
     stream.body = "body_" + Math.floor(Math.random() * 0x1000000);
 
     stream.map('foo', function(seq, data) {

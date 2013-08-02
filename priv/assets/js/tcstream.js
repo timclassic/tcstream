@@ -63,34 +63,9 @@ TCStreamPath.prototype = {
         this._xhrobj.send(data);
     },
 
-    /* Free all resources for this Path */
-    destroy: function() {
-        if (this._xhrobj) {
-            this.disconnect();
-
-            /* Clean up event handlers */
-            if (window.XDomainRequest) {
-                delete this._xhrobj.onload;
-            } else {
-                delete this._xhrobj.onreadystatechange;
-            }
-            delete this._xhrobj.onprogress;
-            delete this._xhrobj.ontimeout;
-            delete this._xhrobj.onerror;
-
-            delete this._xhrobj;
-            this._xhrobj = null;
-        }
-    },
-
     /* Disconnect XHR/XDR object */
     disconnect: function() {
-        this._xhrobj.abort();
-    },
-
-    /* Clean up TCStreamPath object */
-    reset: function() {
-        this.disconnect();
+        this._path_state = 'disconnecting';
 
         /* Clean up event handlers */
         if (window.XDomainRequest) {
@@ -102,6 +77,9 @@ TCStreamPath.prototype = {
         delete this._xhrobj.ontimeout;
         delete this._xhrobj.onerror;
 
+        /* Cancel any pending connections */
+        this._xhrobj.abort();
+
         /* Finally, delete the XHR/XDR object itself if we are on
          * Windows.  IE8 (and perhaps other versions) will crash after
          * a little while if we don't do this.  Memory usage stays
@@ -110,6 +88,7 @@ TCStreamPath.prototype = {
          * Chrome prefers to reuse the same object. */
         if (window.XDomainRequest) {
             delete this._xhrobj;
+            this._xhrobj = undefined;
         }
 
         /* Reset state of this object */
@@ -120,6 +99,14 @@ TCStreamPath.prototype = {
         if (window.XDomainRequest) {
             this._xhrobj = this._create_xhr();
         }
+    },
+
+    /* Destroy any resources that still exist within this TCStreamPath
+     * object */
+    destroy: function() {
+        this.disconnect();
+        delete this._xhrobj;
+        this._xhrobj = undefined;
     },
 
     /*
@@ -134,25 +121,35 @@ TCStreamPath.prototype = {
         if (window.XDomainRequest) {
             /* IE */
             this._xhrobj.onload = function(event) {
-                streamxhr._handle_pathend(event);
+                if (streamxhr._path_state != 'disconnecting') {
+                    streamxhr._handle_pathend(event);
+                }
             };
         } else {
             /* Others */
             this._xhrobj.onreadystatechange = function(event) {
-                if (streamxhr._xhrobj.readyState === 4) {
-                    streamxhr._handle_pathend(event);
+                if (streamxhr._path_state != 'disconnecting') {
+                    if (streamxhr._xhrobj.readyState === 4) {
+                        streamxhr._handle_pathend(event);
+                    }
                 }
             };
         }
 
         this._xhrobj.onprogress = function(event) {
-            streamxhr._handle_progress(event);
+            if (streamxhr._path_state != 'disconnecting') {
+                streamxhr._handle_progress(event);
+            }
         };
         this._xhrobj.ontimeout = function(event) {
-            streamxhr._handle_timeout(event);
+            if (streamxhr._path_state != 'disconnecting') {
+                streamxhr._handle_timeout(event);
+            }
         };
         this._xhrobj.onerror = function(event) {
-            streamxhr._handle_error();
+            if (streamxhr._path_state != 'disconnecting') {
+                streamxhr._handle_error();
+            }
         };
 
         this._xhrobj.timeout = 0;
@@ -234,8 +231,14 @@ TCStreamPath.prototype = {
         /* Process any remaining messages and ignore throttle */
         this._parse_path(true);
 
-        /* Sanity check what the browser is telling us */
-        if (this._frame_off != this._rt.length) {
+        /* Sanity check what the browser is telling us.
+         *
+         * HACK: The extra check for this._rt.length > 0 is there
+         * because of an oddity on Chromium that happens when the back
+         * button is pressed.  It appears that an extra onprogress
+         * event is fired with an empty responseText on an existing
+         * XHR object that previously had data in responseText */
+        if (this._rt.length > 0 && this._frame_off != this._rt.length) {
             throw new Error("_handle_pathend: Frame offset is not equal to "
                             + "responseText length");
         }
@@ -264,6 +267,13 @@ TCStreamPath.prototype = {
     },
 
     _parse_path: function(no_throttle) {
+        /* Because this function is often scheduled, we should make
+         * sure that our XHR/XDR object still exists before
+         * proceeding */
+        if (this._xhrobj === undefined) {
+            return;
+        }
+
         /* Unless no_throttle is `true', We are only allowed to run
          * once every 100ms so that we don't destroy the browser's
          * CPU */
@@ -783,7 +793,7 @@ TCStreamSession.prototype = {
         var stream = this;
 
         if (this._path[ref] != undefined) {
-            this._path[ref].reset();
+            this._path[ref].disconnect();
         } else {
             this._path[ref] = new TCStreamPath(ref, this);
         }
@@ -853,7 +863,10 @@ TCStreamSession.prototype = {
     /* Handle end of individual path */
     _handle_path_end: function(ref) {
         if (ref != this._current_path) {
-            throw new Error("Unexpected end of standby path");
+            /* Unexpected end of standby path, trigger recovery
+             * mode */
+            this._handle_error();
+            return;
         }
 
         /* Toggle the current path */
@@ -1025,13 +1038,6 @@ TCStreamSession.prototype = {
     },
 
     _terminate_stream: function() {
-        /* Shut down all connections */
-        for (var i = 0; i < 2; i++) {
-            if (this._path[i] != undefined) {
-                this._path[i].disconnect();
-            }
-        }
-
         /* Cancel all outstanding timers (do this directly to avoid
          * special handling in _cancel_*_timer functions) */
         if (this._recovery_timer != undefined) {
@@ -1049,6 +1055,15 @@ TCStreamSession.prototype = {
         if (this._inact_timer != undefined) {
             clearTimeout(this._inact_timer);
             this._inact_timer = undefined;
+        }
+
+        /* Shut down all connections */
+        for (var i = 0; i < 2; i++) {
+            if (this._path[i] != undefined) {
+                this._path[i].disconnect();
+                this._path[i].destroy();
+                this._path[i] = undefined;
+            }
         }
     },
 
@@ -1089,6 +1104,7 @@ TCStreamSession.prototype = {
         for (var i = 0; i < 2; i++) {
             if (this._path[i] != undefined) {
                 this._path[i].disconnect();
+                this._path[i] = undefined;
             }
         }
 
@@ -1105,18 +1121,5 @@ TCStreamSession.prototype = {
         this._need_nonce = true;
 
         this._recovery_timer = this._sched_recovery(this.recovery_interval);
-    },
-
-    /* Free all resources for this Stream Session, including its Paths */
-    destroy: function() {
-        this._terminate_stream();
-
-        for (var i = 0; i < 2; i++) {
-            if (this._path[i] != undefined) {
-                this._path[i].destroy();
-            }
-        }
-
-        this._path = null;
     }
 }
