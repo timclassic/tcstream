@@ -156,6 +156,12 @@ TCStreamPath.prototype = {
     },
 
     _reset_state: function() {
+        /* Cancel outstanding parse timer if set */
+        if (this._last_parse_timer != undefined) {
+            clearTimeout(this._last_parse_timer);
+            this._last_parse_timer = undefined;
+        }
+
         /* Current response text */
         this._rt = "";
 
@@ -163,7 +169,6 @@ TCStreamPath.prototype = {
         this._ver = 0;
         this._path_state = 'sync_frame';
         this._last_parse = 0;
-        this._last_parse_timer = undefined;
 
         /* Frame tracking */
         this._frame_off = 0;    // Current frame offset
@@ -280,7 +285,7 @@ TCStreamPath.prototype = {
         if (no_throttle === false) {
             var now = (new Date()).getTime();
             var diff = now - this._last_parse;
-            if (diff < 100) {
+            if (diff < 100 && this._last_parse != 0) {
                 /* 100ms haven't passed yet.  Reschedule _parse_path()
                  * if it has not already been done */
                 if (this._last_parse_timer === undefined) {
@@ -308,6 +313,21 @@ TCStreamPath.prototype = {
          * Done via a separate function to allow for easier
          * profiling. */
         this._save_responseText();
+
+        /* If no new data has shown up in responseText, we may need to
+         * wait a little longer to retrieve the data.  Hence, we
+         * reschedule a _parse_path() run for a bit later.
+         *
+         * This is known to happen on Chrome during a new path setup
+         * on an otherwise idle stream.  Even though the onprogress
+         * event has fired, responseText is empty so we cannot yet
+         * read the SYNC or NONCE frames.  It would appear that Chrome
+         * cannot be trusted to always fire onprogress *after* data is
+         * available in responseText. */
+        if (this._frame_off === this._rt.length) {
+            this._last_parse_timer = this._sched_parse_path(105);
+            return;
+        }
 
         var i = 0;
         while (this._frame_off != this._rt.length) {

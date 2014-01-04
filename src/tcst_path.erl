@@ -221,14 +221,6 @@ setup_stream(SPid) ->
     {CFrame, fun() -> send_nonce(Z, SPid) end}.
 
 send_nonce(Z, SPid) ->
-    %% Send nonce to use for next connection.
-    %%
-    %% Hacky side-effect: The NONCE frame appears to be required for
-    %% Chrome to work properly.  Chrome doesn't send us an onprogress
-    %% event until it has received at least one chunk after the sync
-    %% frame.  I believe this behavior started once I enabled gzip
-    %% compression.
-
     %% Generate the next nonce and inform session of new value.
     Nonce = tcst_session:generate_nonce(),
     ok = tcst_session:set_nonce(SPid, Nonce),

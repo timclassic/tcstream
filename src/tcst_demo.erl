@@ -23,13 +23,16 @@ session_init(SessionID, Args) ->
     {ok, #state{id = SessionID, args = Args}}.
 
 session_start(#state{args = [big]} = SessionState) ->
-    Pid = stream(self(), 1),
+    Pid = stream(self(), 3),
     SessionState#state{pid = Pid};
 session_start(#state{args = [small]} = SessionState) ->
     Pid = stream2(self(), 1),
     SessionState#state{pid = Pid};
 session_start(#state{args = [counter]} = SessionState) ->
     Pid = stream3(self(), 1),
+    SessionState#state{pid = Pid};
+session_start(#state{args = [idle]} = SessionState) ->
+    Pid = stream4(self(), 1000),
     SessionState#state{pid = Pid}.
 
 session_end(#state{pid = Pid} = _SessionState) ->
@@ -223,6 +226,20 @@ stream3(Pid, Sleep) ->
                 receive
                     stop  ->
                         error_logger:info_msg("Stopping stream3 (pid ~p)\n",
+                                              [self()]),
+                        ok
+                after
+                    Sleep -> G(G, Acc + 1)
+                end
+        end,
+    H = fun() -> F(F, 0) end,
+    proc_lib:spawn_link(H).
+
+stream4(_Pid, Sleep) ->
+    F = fun(G, Acc) ->
+                receive
+                    stop  ->
+                        error_logger:info_msg("Stopping stream4 (pid ~p)\n",
                                               [self()]),
                         ok
                 after
