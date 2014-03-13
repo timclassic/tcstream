@@ -24,6 +24,8 @@
 
 -include_lib("webmachine/include/webmachine.hrl").
 
+-define(CHUNK_SIZE, 10240).
+
 -record(context, {session, module, args = []}).
 
 
@@ -233,8 +235,9 @@ send_nonce(Z, SPid) ->
 wait_for_events(Z) ->
     receive
         {send, Frame} ->
-            CFrame = iolist_to_binary(zlib:deflate(Z, Frame, sync)),
-            {CFrame, fun() -> wait_for_events(Z) end};
+            FrameSize = byte_size(Frame),
+            send_next_chunk(Z, Frame, FrameSize, ?CHUNK_SIZE);
+
         {close, From} ->
             CFrame = iolist_to_binary(zlib:deflate(Z, [], finish)),
             ok = zlib:deflateEnd(Z),
@@ -242,6 +245,19 @@ wait_for_events(Z) ->
             From ! ok,
             {CFrame, done}
     end.
+
+send_next_chunk(Z, Frame, Remaining, ChunkSize)
+  when ChunkSize < Remaining ->
+    %% This is not the last chunk--split off a chunk
+    {Chunk, NewFrame} = split_binary(Frame, ChunkSize),
+    CChunk = iolist_to_binary(zlib:deflate(Z, Chunk, sync)),
+    NewRem = Remaining - ChunkSize,
+    {CChunk, fun() -> send_next_chunk(Z, NewFrame, NewRem, ChunkSize) end};
+send_next_chunk(Z, Frame, Remaining, ChunkSize)
+  when ChunkSize >= Remaining ->
+    %% Last chunk
+    CChunk = iolist_to_binary(zlib:deflate(Z, Frame, sync)),
+    {CChunk, fun() -> wait_for_events(Z) end}.
 
 build_sync_frame() ->
     %% We need some uncompressible data to use in the sync frame to

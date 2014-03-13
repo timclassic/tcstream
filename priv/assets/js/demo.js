@@ -79,6 +79,15 @@ jQuery(function() {
 
         stream.ack(seq);
     });
+    stream.map('reallybig_md5', function(seq, data) {
+        $("#streamit").append("<br />Server's MD5 Sum is " + data);
+        stream.ack(seq);
+    });
+    stream.map('reallybig', function(seq, data) {
+        $("#streamit").append("<br />Received full message of length " + data.length);
+        $("#streamit").append("<br />Client's MD5 Sum is " + btoa(md5(data, null, true)));
+        stream.ack(seq);
+    });
 
     stream.onwarning = function() {
         $("#streamit").append("<br />Entered WARNING state");

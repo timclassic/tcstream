@@ -13,8 +13,8 @@ function TCStreamPath(ref, owner) {
     this._max_version_len = 2;
     this._max_frametype_len = 1;
     this._max_channel_len = 20;
-    this._max_length_len = 6;
-    this._max_seq_len = 6;
+    this._max_length_len = 20;
+    this._max_seq_len = 20;
 
     /* Set object state */
     this._reset_state();
@@ -23,6 +23,7 @@ function TCStreamPath(ref, owner) {
     this.ontimeout = new Function();
     this.onsync = new Function();
     this.onnonce = new Function();
+    this.onframeprogress = new Function();
     this.onframe = new Function();
     this.onpathend = new Function();
     this.onerror = new Function();
@@ -608,7 +609,7 @@ TCStreamPath.prototype = {
             case 'length_exceeded':
                 this._xhrobj.abort();
                 throw new Error("Invalid frame header while waiting on " +
-                                "DATA frame");
+                                "DATA frame (frame indicator)");
                 break;
             default:
                 throw e;
@@ -634,7 +635,7 @@ TCStreamPath.prototype = {
             case 'length_exceeded':
                 this._xhrobj.abort();
                 throw new Error("Invalid frame header while waiting on " +
-                                "DATA frame");
+                                "DATA frame (sequence number)");
                 break;
             case 'not_an_integer':
                 this._xhrobj.abort();
@@ -660,7 +661,7 @@ TCStreamPath.prototype = {
             case 'length_exceeded':
                 this._xhrobj.abort();
                 throw new Error("Invalid frame header while waiting on " +
-                                "DATA frame");
+                                "DATA frame (channel name)");
                 break;
             default:
                 throw e;
@@ -682,7 +683,7 @@ TCStreamPath.prototype = {
             case 'length_exceeded':
                 this._xhrobj.abort();
                 throw new Error("Invalid frame header while waiting on " +
-                                "DATA frame");
+                                "DATA frame (length field)");
                 break;
             case 'not_an_integer':
                 this._xhrobj.abort();
@@ -703,6 +704,9 @@ TCStreamPath.prototype = {
     },
 
     _parse_data_payload: function() {
+        /* Signal DATA frame progress */
+        this.onframeprogress(this._ref);
+
         var data_end = this._data_off + this._data_len;
         if (data_end > this._rt.length) {
             /* Not enough data has arrived, wait for next event */
@@ -837,6 +841,9 @@ TCStreamSession.prototype = {
         this._path[ref].onnonce = function(ref, nonce) {
             stream._handle_nonce(ref, nonce);
         };
+        this._path[ref].onframeprogress = function(ref) {
+            stream._handle_frame_progress(ref);
+        };
         this._path[ref].onframe = function(ref, seq, channel, data) {
             stream._handle_frame(ref, seq, channel, data);
         };
@@ -961,12 +968,15 @@ TCStreamSession.prototype = {
         }
     },
 
-    /* Handle new frame */
-    _handle_frame: function(ref, seq, channel, data) {
+    /* Handle new frame progress */
+    _handle_frame_progress: function(ref) {
         /* Reset the inactivity timer */
         this._cancel_inact_timer();
         this._set_inact_timer();
+    },
 
+    /* Handle new frame */
+    _handle_frame: function(ref, seq, channel, data) {
         if (ref != this._current_path) {
             /* If frame has arrived on standby path, add to queue */
             this._standby_msgs[this._standby_msgs.length] = {
