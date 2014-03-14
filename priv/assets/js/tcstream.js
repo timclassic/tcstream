@@ -9,7 +9,12 @@ function TCStreamPath(ref, owner) {
 
     /* Max header length.  This constant indirectly controls the
      * maximum payload length in SYNC and DATA frames by bounding the
-     * max string length of the data length fields */
+     * max string length of the data length fields.
+     *
+     * These values do not protect anything in particular; they were
+     * useful during protocol development for quickly diagnosing
+     * parsing errors.  It is entirely possible that these values, and
+     * the checks that use them, can be removed at a later date.  */
     this._max_version_len = 2;
     this._max_frametype_len = 1;
     this._max_channel_len = 20;
@@ -439,7 +444,7 @@ TCStreamPath.prototype = {
             case 'length_exceeded':
                 this._xhrobj.abort();
                 throw new Error("Invalid frame header while waiting on " +
-                                "SYNC frame");
+                                "SYNC frame (version number)");
                 break;
             case 'not_an_integer':
                 this._xhrobj.abort();
@@ -470,7 +475,7 @@ TCStreamPath.prototype = {
             case 'length_exceeded':
                 this._xhrobj.abort();
                 throw new Error("Invalid frame header while waiting on " +
-                                "SYNC frame");
+                                "SYNC frame (frame indicator)");
                 break;
             default:
                 throw e;
@@ -496,7 +501,7 @@ TCStreamPath.prototype = {
             case 'length_exceeded':
                 this._xhrobj.abort();
                 throw new Error("Invalid frame header while waiting on " +
-                                "SYNC frame");
+                                "SYNC frame (length field)");
                 break;
             case 'not_an_integer':
                 this._xhrobj.abort();
@@ -556,7 +561,7 @@ TCStreamPath.prototype = {
             case 'length_exceeded':
                 this._xhrobj.abort();
                 throw new Error("Invalid frame header while waiting on " +
-                                "NONCE frame");
+                                "NONCE frame (frame indicator)");
                 break;
             default:
                 throw e;
