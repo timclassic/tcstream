@@ -182,10 +182,19 @@ post_return_with_no_session(ReqData, Context) ->
      Context}.
 
 set_stream_headers(ReqData) ->
-    %% IE's XDomainRequest requires that Access-Control-Allow-Origin
-    %% be set
-    ReqData1 = wrq:set_resp_header("Access-Control-Allow-Origin",
-                                   "*", ReqData),
+    %% Set Access-Control-Allow-Origin if this is a CORS request.
+    %% This was added to satisfy IE's XDomainRequest object, thus it
+    %% may not be a full implementation of an HTTP server's
+    %% responsibilites around CORS
+    OriginH = wrq:get_req_header("Origin", ReqData),
+    ReqData1 =
+        case OriginH of
+            undefined->
+                ReqData;
+            _ ->
+                wrq:set_resp_header("Access-Control-Allow-Origin",
+                                    OriginH, ReqData)
+        end,
 
     %% Don't let browsers do any caching of this resource
     ReqData2 = wrq:set_resp_header("Cache-Control", "no-cache",
@@ -195,7 +204,9 @@ set_stream_headers(ReqData) ->
     ReqData3 = wrq:set_resp_header("Content-Encoding", "gzip",
                                    ReqData2),
 
-    ReqData3.
+    %% Protect against Clickjacking
+    ReqData4 = wrq:set_resp_header("X-Frame-Options", "SAMEORIGIN", ReqData3),
+    ReqData4.
 
 setup_stream(SPid) ->
     Frame = build_sync_frame(),
