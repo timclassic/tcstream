@@ -182,15 +182,17 @@ handle_sync_event(Event, _From, StateName, StateData) ->
 
 handle_info({timeout, TRef, close}, _StateName,
             #state{close_tref = TRef, id = ID} = StateData) ->
-    error_logger:info_msg("Session ~s shutting down due to idleness\n", [ID]),
+    error_logger:info_msg("Session ~s shutting down due to idleness\n", [ID]),    
     {stop, normal, StateData};
 handle_info(_Info, StateName, StateData) ->
     {next_state, StateName, StateData}.
 
 terminate(_Reason, _StateName,
           #state{mod = Mod,
-                 user_state = UserState} = _StateData) ->
+                 user_state = UserState, path0 = Path0Pid, path1 = Path1Pid} = _StateData) ->
     Mod:session_end(UserState),
+    ok = tcst_path:close(Path0Pid),
+    ok = tcst_path:close(Path1Pid),
     ok.
 
 code_change(_OldVsn, StateName, StateData, _Extra) ->

@@ -38,12 +38,14 @@ send(Pid, Seq, Channel, Data) ->
     Pid ! {send, Frame},
     erlang:byte_size(Frame).
 
-close(Pid) ->
+close(undefined) ->
+    ok;
+close(Pid) ->    
     try
         Pid ! {close, self()},
         ok
     catch
-        error:badarg ->
+        error:badarg ->            
             %% Connection already closed, ignore
             ok
     end.
