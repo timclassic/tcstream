@@ -246,6 +246,7 @@ send_nonce(Z, SPid) ->
     {CFrame, fun() -> wait_for_events(Z) end}.
 
 wait_for_events(Z) ->
+    Timeout = tcstream:get_path_noop_interval(),
     receive
         {send, Frame} ->
             FrameSize = byte_size(Frame),
@@ -257,6 +258,16 @@ wait_for_events(Z) ->
             ok = zlib:close(Z),
             From ! ok,
             {CFrame, done}
+
+    after
+        Timeout ->
+            %% Send a no-op DATA frame to trigger the webserver's TCP
+            %% connection closure detection; otherwise, we could hang
+            %% in this receive forever
+            Frame = build_data_frame(1, <<"Z">>, <<"z">>),
+            FrameSize = byte_size(Frame),
+            send_next_chunk(Z, Frame, FrameSize, ?CHUNK_SIZE)
+
     end.
 
 send_next_chunk(Z, Frame, Remaining, ChunkSize)

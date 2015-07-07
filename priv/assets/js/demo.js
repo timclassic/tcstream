@@ -2,8 +2,18 @@ var i = 0;
 var last_num = -1;
 
 jQuery(function() {
+    /* Set body and path defaults */
+    var body = "body_" + Math.floor(Math.random() * 0x1000000);
+    var demo_path = tcstream_variant;
+
+    /* Override body and path in case of conflict test */
+    if (tcstream_variant === "stream_conflict") {
+        body = "body_conflicting";
+        demo_path = "stream_idle";
+    }
+
     var URL = window.location.protocol + "//" +
-              window.location.host + "/" + tcstream_variant;
+              window.location.host + "/" + demo_path;
     var stream = new TCStreamSession(URL);
 
 
@@ -38,8 +48,7 @@ jQuery(function() {
     portableAddListener("beforeunload", beforeunload_handler);
     portableAddListener("pageshow", pageshow_handler);
 
-
-    stream.body = "body_" + Math.floor(Math.random() * 0x1000000);
+    stream.body = body;
 
     stream.map('foo', function(seq, data) {
         i += data.length;
