@@ -912,11 +912,7 @@ TCStreamSession.prototype = {
         if (this._standby_msgs.length > 0) {
             for (var i = 0, len = this._standby_msgs.length; i < len; i++) {
                 var m = this._standby_msgs[i];
-                if (m.channel in this._channels) {
-                    this._channels[m.channel](m.seq, m.data)
-                } else {
-                    /* Unmapped channel, ignore data */
-                }
+                this._schedule_data(m.channel, m.seq, m.data);
             }
             this._standby_msgs = new Array();
         }
@@ -992,11 +988,16 @@ TCStreamSession.prototype = {
 
         } else {
             /* Otherwise, go ahead and route to proper handler */
-            if (channel in this._channels) {
-                this._channels[channel](seq, data)
-            } else {
-                /* Unmapped channel, ignore data */
-            }
+            this._schedule_data(channel, seq, data);
+        }
+    },
+
+    _schedule_data: function(channel, seq, data) {
+        if (channel in this._channels) {
+            var stream = this;
+            setTimeout(function() { stream._channels[channel](seq, data); }, 0);
+        } else {
+            /* Unmapped channel, ignore data */
         }
     },
 
