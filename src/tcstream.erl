@@ -28,6 +28,7 @@ stop() ->
 
 debug() ->
     ok = application:start(sasl),
+    ok = application:start(asn1),
     ok = application:start(gproc),
     ok = application:start(inets),
     ok = application:start(crypto),
