@@ -1,3 +1,17 @@
+%% This Source Code Form is subject to the terms of the Mozilla Public
+%% License, v. 2.0. If a copy of the MPL was not distributed with this
+%% file, You can obtain one at http://mozilla.org/MPL/2.0/.
+%%
+%% Copyright 2013 trueEX Group, LLC
+
+%%%-------------------------------------------------------------------------
+%%% @author Tim Stewart <tim@trueex.com>
+%%%  [http://www.trueex.com]
+%%% @copyright 2013 trueEX Group, LLC
+%%% @doc Demonstration resource for tcstream test harness
+%%% @end
+%%%-------------------------------------------------------------------------
+
 -module(tcst_demo_resource).
 -export([init/1]).
 -export([allowed_methods/2,
